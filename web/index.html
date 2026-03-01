@@ -122,6 +122,26 @@
             opacity: 1 !important;
         }
 
+        /* Layout Separators */
+        .ns-separator {
+            stroke: rgba(255, 255, 255, 0.05);
+            stroke-width: 1px;
+            pointer-events: none;
+        }
+
+        .ns-v-separator {
+            stroke: rgba(255, 255, 255, 0.08);
+            stroke-width: 1.5px;
+            pointer-events: none;
+        }
+
+        .ns-label {
+            fill: rgba(255, 255, 255, 0.3);
+            font-family: var(--font-ui);
+            pointer-events: none;
+            user-select: none;
+        }
+
         .glass {
             background: rgba(18, 18, 18, 0.7);
             backdrop-filter: blur(24px) saturate(150%);
@@ -269,6 +289,40 @@
             font-weight: 600;
         }
 
+        /* Custom Scrollbar Utility */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        #viz-container {
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #viz {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
         /* Inspector Side Panel */
         .inspector {
             position: fixed;
@@ -387,30 +441,6 @@
             color: var(--accent-red);
         }
 
-        /* Custom Scrollbar */
-        .inspector::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .inspector::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .inspector::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 10px;
-        }
-
-        .inspector::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.25);
-        }
-
-        #viz-container {
-            width: 100%;
-            height: 100%;
-            position: relative;
-        }
-
         /* Filter Dropdown */
         .dropdown-container {
             position: relative;
@@ -418,24 +448,26 @@
 
         .dropdown-menu {
             position: absolute;
-            left: 100%;
-            top: 0;
-            margin-left: 12px;
-            width: 240px;
-            padding: 8px;
-            border-radius: 8px;
+            left: calc(100% + 12px);
+            top: -12px;
+            width: 300px;
+            padding: 12px;
+            border-radius: 12px;
+            background: rgba(18, 18, 18, 0.82) !important;
+            backdrop-filter: blur(40px) saturate(180%) !important;
+            -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 6px;
             z-index: 2000;
         }
 
         .dropdown-item {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 6px 8px;
-            border-radius: 4px;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
             cursor: pointer;
             transition: background 0.2s;
         }
@@ -447,13 +479,14 @@
         .dropdown-item input[type="checkbox"] {
             accent-color: var(--accent-green);
             cursor: pointer;
-            width: 14px;
-            height: 14px;
+            width: 18px;
+            height: 18px;
             margin: 0;
         }
 
         .dropdown-item span {
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: 500;
             color: var(--text-primary);
             word-break: break-all;
         }
@@ -490,10 +523,7 @@
                                 x-text="allNamespaces.length"></span>)</span>
                     </button>
                     <div class="dropdown-menu glass" x-show="showFilterMenu" style="display: none;">
-                        <div
-                            style="padding: 4px 8px; font-size: 10px; font-weight: bold; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 4px;">
-                            Visible Namespaces</div>
-                        <div style="max-height: 300px; overflow-y: auto;" class="inspector">
+                        <div style="max-height: 450px; overflow-y: auto;" class="custom-scrollbar">
                             <template x-for="ns in allNamespaces" :key="ns">
                                 <label class="dropdown-item">
                                     <input type="checkbox" :checked="!ignoredNamespaces.includes(ns)"
@@ -528,7 +558,7 @@
         </div>
 
         <!-- Inspector Sidebar -->
-        <div id="inspector" class="inspector glass" :class="inspectorOpen ? 'open' : ''">
+        <div id="inspector" class="inspector glass custom-scrollbar" :class="inspectorOpen ? 'open' : ''">
             <template x-if="selectedNode">
                 <div style="height: 100%; display: flex; flex-direction: column;">
                     <div class="inspector-header">

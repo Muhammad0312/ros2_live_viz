@@ -19,6 +19,7 @@ document.addEventListener('alpine:init', () => {
         ignoredNamespaces: [],
         showFilterMenu: false,
         lastPayload: null,
+        firstGraphLoad: true,
 
         toggleNamespace(ns) {
             if (this.ignoredNamespaces.includes(ns)) {
@@ -225,6 +226,11 @@ document.addEventListener('alpine:init', () => {
             this.recalculateColumnAllocations();
 
             this.updateD3();
+
+            if (this.firstGraphLoad && this.graphData.nodes.length > 0) {
+                this.firstGraphLoad = false;
+                setTimeout(() => this.fitView(), 100);
+            }
         },
 
         recalculateColumnAllocations() {
@@ -557,7 +563,9 @@ document.addEventListener('alpine:init', () => {
         },
 
         calculateNodeWidth(id) {
-            return Math.max(160, (id.length * 7) + 40);
+            const parts = id.split('/');
+            const name = parts[parts.length - 1] || id;
+            return Math.max(160, (name.length * 8) + 50);
         },
 
         updateD3() {
@@ -747,10 +755,7 @@ document.addEventListener('alpine:init', () => {
                 let sepLine = this.g.selectAll(".ns-separator").data(separators, d => d.id);
                 sepLine.exit().remove();
                 const sepEnter = sepLine.enter().insert("line", ".link")
-                    .attr("class", "ns-separator")
-                    .attr("stroke", "rgba(255,255,255,0.15)")
-                    .attr("stroke-width", 2)
-                    .attr("stroke-dasharray", "12,12");
+                    .attr("class", "ns-separator");
                 sepLine = sepEnter.merge(sepLine);
                 sepLine
                     .attr("x1", d => d.x1).attr("x2", d => d.x2)
@@ -760,10 +765,7 @@ document.addEventListener('alpine:init', () => {
                 let vSepLine = this.g.selectAll(".ns-v-separator").data(vSeparators, d => d.id);
                 vSepLine.exit().remove();
                 const vSepEnter = vSepLine.enter().insert("line", ".link")
-                    .attr("class", "ns-v-separator")
-                    .attr("stroke", "rgba(255,255,255,0.3)")
-                    .attr("stroke-width", 3)
-                    .attr("stroke-dasharray", "15,10");
+                    .attr("class", "ns-v-separator");
                 vSepLine = vSepEnter.merge(vSepLine);
                 vSepLine
                     .attr("x1", d => d.x).attr("x2", d => d.x)
@@ -788,12 +790,7 @@ document.addEventListener('alpine:init', () => {
                 let nsLabel = this.g.selectAll(".ns-label").data(labelData, d => d.ns);
                 nsLabel.exit().remove();
                 const labelEnter = nsLabel.enter().insert("text", ".link")
-                    .attr("class", "ns-label")
-                    .attr("fill", "rgba(255, 255, 255, 0.4)")
-                    .attr("font-size", "14px")
-                    .attr("font-weight", "500")
-                    .attr("letter-spacing", "1.5px")
-                    .attr("font-family", "var(--font-mono)");
+                    .attr("class", "ns-label");
                 nsLabel = labelEnter.merge(nsLabel);
                 nsLabel
                     .attr("x", d => d.xPos)

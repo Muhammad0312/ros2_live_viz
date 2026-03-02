@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>ros2_live_viz | Live Topology (V2)</title>
+    <!-- Use local Alpine.js and D3.js -->
+    <script defer src="./vendor/alpine.min.js"></script>
+    <script src="./vendor/d3.v7.min.js"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-deep: #0a0a0a;
+            --bg-node-header: #1a1a1a;
+            --bg-node-body: #121212;
+            --bg-panel: rgba(18, 18, 18, 0.8);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #ffffff;
+            --text-secondary: #888888;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --node-node: #a855f7;
+            /* Purple for ROS nodes */
+            --font-ui: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        body {
+            font-family: var(--font-ui);
+            background: var(--bg-deep);
+            background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 32px 32px;
+            color: var(--text-primary);
+            margin: 0;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* D3 SVG Styles */
+        svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .node rect.node-header-bg {
+            fill: var(--bg-node-header);
+            stroke: var(--border-color);
+            rx: 8;
+            ry: 8;
+            cursor: pointer;
+            transition: stroke 0.2s;
+        }
+
+        .node rect.node-body-bg {
+            fill: var(--bg-node-body);
+            stroke: var(--border-color);
+            rx: 8;
+            ry: 8;
+            cursor: pointer;
+            transition: stroke 0.2s;
+        }
+
+        .node text.node-name {
+            font-size: 13px;
+            font-weight: 500;
+            fill: var(--text-primary);
+            pointer-events: none;
+        }
+
+        .node .node-type-label {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            fill: var(--text-secondary);
+            pointer-events: none;
+        }
+
+        .node .type-indicator {
+            rx: 50%;
+            ry: 50%;
+        }
+
+        .link {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.15);
+            stroke-width: 1.5px;
+            transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
+        }
+
+        /* Interaction Highlights */
+        .node.highlight rect.node-header-bg,
+        .node.highlight rect.node-body-bg {
+            stroke: var(--accent-green);
+            stroke-width: 1.5px;
+        }
+
+        .node.highlight {
+            filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.25));
+        }
+
+        .node.dimmed {
+            opacity: 0.2;
+        }
+
+        .link.dimmed {
+            opacity: 0.05;
+        }
+
+        .link.highlight {
+            stroke: var(--accent-green);
+            stroke-width: 2px;
+            opacity: 1 !important;
+        }
+
+        .glass {
+            background: rgba(18, 18, 18, 0.7);
+            backdrop-filter: blur(24px) saturate(150%);
+            -webkit-backdrop-filter: blur(24px) saturate(150%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        .hud-top-bar {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            padding: 8px 16px;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 16px;
+            z-index: 1000;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-dot.connected {
+            background-color: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+        }
+
+        .status-dot.disconnected {
+            background-color: var(--accent-red);
+            box-shadow: 0 0 8px var(--accent-red);
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: var(--font-ui);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn.active {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: rgba(16, 185, 129, 0.5);
+            color: var(--accent-green);
+        }
+
+        .search-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-input {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-family: var(--font-mono);
+            width: 120px;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        .search-input:focus {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.3);
+            width: 160px;
+        }
+
+        .search-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* Search Match Styling */
+        .node.search-match rect.node-header-bg,
+        .node.search-match rect.node-body-bg {
+            stroke: #3b82f6;
+            /* Blue glow for search */
+            stroke-width: 2px;
+        }
+
+        .node.search-match {
+            filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.4));
+        }
+
+        .stats-horizontal {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border-left: 1px solid var(--border-color);
+            padding-left: 16px;
+            height: 24px;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            color: #4db6ac;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        /* Inspector Side Panel */
+        .inspector {
+            position: fixed;
+            top: 24px;
+            right: -420px;
+            bottom: 24px;
+            width: 380px;
+            padding: 32px;
+            transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            overflow-y: auto;
+            border-radius: 16px;
+            z-index: 2000;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .inspector.open {
+            right: 24px;
+        }
+
+        .inspector-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .inspector-title-group {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .inspector h2 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: #ffffff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: var(--font-mono);
+        }
+
+        .inspector .type-badge {
+            font-size: 10px;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            display: block;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px;
+            line-height: 1;
+        }
+
+        .inspector-section {
+            margin-top: 24px;
+        }
+
+        .inspector-section h3 {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .inspector-section h3::before {
+            content: "";
+            width: 4px;
+            height: 4px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+        }
+
+        .topic-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            margin-bottom: 8px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            border: 1px solid transparent;
+        }
+
+        .topic-name {
+            color: var(--text-primary);
+            word-break: break-all;
+            padding-right: 12px;
+        }
+
+        .topic-hz {
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .topic-hz.active {
+            color: var(--accent-green);
+        }
+
+        .topic-hz.dead {
+            color: var(--accent-red);
+        }
+
+        /* Custom Scrollbar */
+        .inspector::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .inspector::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .inspector::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+        }
+
+        .inspector::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        #viz-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+    </style>
+</head>
+
+<body x-data="DashboardApp()">
+    <div id="viz-container">
+
+        <!-- HUD -->
+        <div class="hud-top-bar glass">
+            <div class="connection-status" :title="connected ? 'Connected to ws://localhost:' + port : 'Disconnected'">
+                <div class="status-dot" :class="connected ? 'connected' : 'disconnected'"></div>
+            </div>
+
+            <div class="controls">
+                <div class="search-container">
+                    <input type="text" class="search-input" placeholder="Find node..." x-model="searchQuery"
+                        @input="applyHighlighting()">
+                </div>
+                <!-- Divider -->
+                <div style="width: 1px; height: 16px; background: var(--border-color); margin: 0 4px;"></div>
+                <button class="btn" @click="fitView" title="Fit to Screen">
+                    <span>Fit View</span>
+                </button>
+                <button class="btn" :class="monitorHz ? 'active' : ''" @click="toggleHz" title="Toggle Hz Polling">
+                    <span>Hz: <span x-text="monitorHz ? 'ON' : 'OFF'"></span></span>
+                </button>
+            </div>
+
+            <div class="stats-horizontal">
+                <div class="stat-item">
+                    <span class="stat-label">Nodes</span>
+                    <span class="stat-value" x-text="metrics.nodes">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Topics</span>
+                    <span class="stat-value" x-text="metrics.topics">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Edges</span>
+                    <span class="stat-value" x-text="metrics.edges">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Inspector Sidebar -->
+        <div id="inspector" class="inspector glass" :class="inspectorOpen ? 'open' : ''">
+            <template x-if="selectedNode">
+                <div style="height: 100%; display: flex; flex-direction: column;">
+                    <div class="inspector-header">
+                        <div class="inspector-title-group">
+                            <h2 x-text="selectedNode.id" :title="selectedNode.id"></h2>
+                            <span class="type-badge">ROS Node</span>
+                        </div>
+                        <button class="close-btn" @click="closeInspector">✕</button>
+                    </div>
+
+                    <div class="inspector-section" x-show="selectedNode.pubs.length > 0">
+                        <h3>Publishing</h3>
+                        <template x-for="topic in selectedNode.pubs" :key="topic">
+                            <div class="topic-row">
+                                <span class="topic-name" x-text="topic"></span>
+                                <template x-if="monitorHz">
+                                    <span class="topic-hz"
+                                        :class="(topicHz[topic] && topicHz[topic] > 0) ? 'active' : 'dead'"
+                                        x-text="(topicHz[topic] && topicHz[topic] > 0) ? topicHz[topic].toFixed(1) + ' Hz' : '✗ dead'">
+                                    </span>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="inspector-section" x-show="selectedNode.subs.length > 0">
+                        <h3>Subscribing</h3>
+                        <template x-for="topic in selectedNode.subs" :key="topic">
+                            <div class="topic-row">
+                                <span class="topic-name" x-text="topic"></span>
+                                <template x-if="monitorHz">
+                                    <span class="topic-hz"
+                                        :class="(topicHz[topic] && topicHz[topic] > 0) ? 'active' : 'dead'"
+                                        x-text="(topicHz[topic] && topicHz[topic] > 0) ? topicHz[topic].toFixed(1) + ' Hz' : '✗ dead'">
+                                    </span>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+            <template x-if="!selectedNode">
+                <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+                    <p style="color: var(--text-secondary)">Select a node to view details</p>
+                </div>
+            </template>
+        </div>
+
+        <!-- D3 SVG Container -->
+        <svg id="viz"></svg>
+    </div>
+
+    <!-- Application Logic -->
+    <script src="./app.js"></script>
+</body>
+
+</html>

@@ -35,9 +35,7 @@
 
 using namespace std::chrono_literals;
 
-====
 // CLI Argument Parser
-====
 struct CliArgs {
     int port = 0;
     pid_t ppid = 0;
@@ -60,9 +58,7 @@ static CliArgs parse_cli(int argc, char * argv[])
     return args;
 }
 
-====
 // Load Intent Tree from JSON file (raw string — no parsing library needed)
-====
 static std::string load_intent_tree(const std::string & path)
 {
     if (path.empty()) return "{}";
@@ -73,9 +69,7 @@ static std::string load_intent_tree(const std::string & path)
     return ss.str();
 }
 
-====
 // LiveVizBackendNode
-====
 class LiveVizBackendNode : public rclcpp::Node
 {
 public:
@@ -505,9 +499,7 @@ private:
     }
 };
 
-====
 // Main
-====
 int main(int argc, char * argv[])
 {
     // Parse our custom args before ROS strips them.

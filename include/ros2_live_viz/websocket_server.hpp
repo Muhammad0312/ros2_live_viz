@@ -37,9 +37,7 @@ using tcp           = boost::asio::ip::tcp;
 
 namespace ros2_live_viz {
 
-====
 // MIME type helper
-====
 inline std::string mime_type(const std::string& path)
 {
     auto const ext = [&path]{
@@ -60,9 +58,7 @@ inline std::string mime_type(const std::string& path)
     return "application/octet-stream";
 }
 
-====
 // WebSocket Session
-====
 class WsSession : public std::enable_shared_from_this<WsSession> {
     websocket::stream<beast::tcp_stream> ws_;
     beast::flat_buffer buffer_;
@@ -161,9 +157,7 @@ private:
     }
 };
 
-====
 // HTTP Session — serves static files OR upgrades to WebSocket
-====
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
@@ -276,9 +270,7 @@ private:
     }
 };
 
-====
 // Listener — accepts connections, dispatches to HTTP or WS
-====
 class Listener : public std::enable_shared_from_this<Listener> {
     net::io_context& ioc_;
     tcp::acceptor acceptor_;
@@ -359,9 +351,7 @@ private:
     }
 };
 
-====
 // WebSocketServer — top-level interface
-====
 class WebSocketServer {
 public:
     explicit WebSocketServer(int port, std::string web_root = "")

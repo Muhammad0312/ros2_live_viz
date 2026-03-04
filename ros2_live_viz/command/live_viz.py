@@ -23,6 +23,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from typing import Any, Text, Tuple
 
 from ament_index_python.packages import get_package_share_directory
@@ -114,9 +115,8 @@ class LiveVizOption(OptionExtension):
 
         # ── 4. Locate the compiled C++ backend ───────────────────────────
         pkg_prefix = get_package_share_directory('ros2_live_viz')
-        # Executable lives at lib/ros2_live_viz/live_viz_backend
         backend_exe = os.path.join(
-            os.path.dirname(pkg_prefix),  # share/ → one level up
+            os.path.dirname(pkg_prefix),
             '..', 'lib', 'ros2_live_viz', 'live_viz_backend'
         )
         backend_exe = os.path.normpath(backend_exe)
@@ -137,22 +137,54 @@ class LiveVizOption(OptionExtension):
             '--intent-file', intent_path,
         ]
 
-        print(
-            f'[ros2_live_viz] Spawning backend: {" ".join(cmd)}',
-            file=sys.stderr
-        )
-
         self._backend_proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
 
-        # ── 6. Register atexit hook ──────────────────────────────────────
+        # ── 6. Read the ephemeral port from stdout ───────────────────────
+        port = None
+        for line in self._backend_proc.stdout:
+            decoded = line.decode('utf-8', errors='replace').strip()
+            if decoded.startswith('LIVE_VIZ_PORT='):
+                port = decoded.split('=', 1)[1]
+                break
+
+        if port:
+            print(
+                f'\n\033[1;32m[ros2_live_viz]\033[0m Dashboard ready at '
+                f'\033[1;4mhttp://localhost:{port}\033[0m\n',
+                file=sys.stderr
+            )
+        else:
+            print(
+                '[ros2_live_viz] WARNING: Could not determine backend port.',
+                file=sys.stderr
+            )
+
+        # ── 7. Drain remaining stdout to a log file in background ────────
+        def _drain_stdout(proc, log_path):
+            try:
+                with open(log_path, 'w') as log_f:
+                    for line in proc.stdout:
+                        log_f.write(line.decode('utf-8', errors='replace'))
+                        log_f.flush()
+            except Exception:
+                pass
+
+        drain_thread = threading.Thread(
+            target=_drain_stdout,
+            args=(self._backend_proc, '/tmp/live_viz_backend.log'),
+            daemon=True
+        )
+        drain_thread.start()
+
+        # ── 8. Register atexit hook ──────────────────────────────────────
         atexit.register(self._cleanup)
 
         print(
-            f'[ros2_live_viz] Backend spawned (PID {self._backend_proc.pid}). '
+            f'[ros2_live_viz] Backend running (PID {self._backend_proc.pid}). '
             f'Continuing with normal launch...',
             file=sys.stderr
         )

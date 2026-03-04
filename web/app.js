@@ -11,6 +11,8 @@ document.addEventListener('alpine:init', () => {
         monitorHz: false,
         topicHz: {},
         searchQuery: '',
+        nsLayout: new Map(), // Cached namespace layouts
+        selectedNodeParams: {}, // Store parameters for the selected node
 
         // Reconciler State
         graphData: { nodes: [], links: [] },
@@ -33,6 +35,7 @@ document.addEventListener('alpine:init', () => {
         init() {
             this.initD3();
             this.connectWs();
+            window.addEventListener("message", (e) => { if (e.data && e.data.type === "mock_ws") { const payload = JSON.parse(e.data.data); if (payload.type === "graph") this.reconcileGraph(payload); } });
         },
 
         connectWs() {
@@ -52,6 +55,7 @@ document.addEventListener('alpine:init', () => {
             };
 
             this.ws.onmessage = (event) => {
+                if (window.TEST_MODE) return;
                 const payload = JSON.parse(event.data);
                 if (payload.type === 'graph') {
                     this.reconcileGraph(payload);
@@ -62,6 +66,10 @@ document.addEventListener('alpine:init', () => {
                         newHz[topic] = hz;
                     }
                     this.topicHz = newHz;
+                } else if (payload.type === 'parameters') {
+                    if (this.selectedNode && this.selectedNode.id === payload.node) {
+                        this.selectedNodeParams = payload.parameters;
+                    }
                 }
             };
         },
@@ -671,7 +679,7 @@ document.addEventListener('alpine:init', () => {
                     if (minY < this.layoutCenterBounds.top) {
                         vSeparators.push({ id: 'v-axis-top', x: 0, y1: minY, y2: this.layoutCenterBounds.top });
                     }
-                    if (maxY > this.layoutCenterBounds.bottom) {
+                    if (maxY < this.layoutCenterBounds.bottom) { // Changed condition to check if maxY is below center bottom
                         vSeparators.push({ id: 'v-axis-bot', x: 0, y1: this.layoutCenterBounds.bottom, y2: maxY });
                     }
                 }
@@ -820,10 +828,10 @@ document.addEventListener('alpine:init', () => {
                     return;
                 }
 
-                // If we removed the actively inspected node, shift focus to the last remaining node in the chain
                 if (this.selectedNode && this.selectedNode.id === d.id) {
                     const remainingNodeId = Array.from(this.selectedChain).pop();
                     this.selectedNode = this.graphData.nodes.find(n => n.id === remainingNodeId);
+                    this.selectedNodeParams = {};
                     if (this.selectedNode) {
                         this.requestHzTelemetry(this.selectedNode);
                     } else {
@@ -857,10 +865,10 @@ document.addEventListener('alpine:init', () => {
             this.selectedChain.add(d.id);
 
             // Recompute active links (any link between two nodes where at least ONE is in the chain)
-            // Wait, standard chained selection highlights the whole chain path.
             this.recomputeChainLinks();
 
             this.selectedNode = d;
+            this.selectedNodeParams = {};
             this.inspectorOpen = true;
             this.applyHighlighting();
 
@@ -1016,21 +1024,27 @@ document.addEventListener('alpine:init', () => {
         },
 
         requestHzTelemetry(nodeObj) {
-            if (!this.monitorHz || !this.connected) return;
+            this.topicHz = {}; // Clear old metrics
+            this.selectedNodeParams = {}; // Clear old parameters
 
-            // Assemble all active topics in the chain
-            const allTopics = new Set();
-
-            // Just request for the currently selected node to avoid overwhelming the C++ backend
-            nodeObj.pubs.forEach(t => allTopics.add(t));
-            nodeObj.subs.forEach(t => allTopics.add(t));
-
-            if (allTopics.size > 0) {
+            // Request parameters
+            if (this.ws && this.connected) {
                 this.ws.send(JSON.stringify({
-                    action: 'monitor',
-                    topics: Array.from(allTopics)
+                    action: 'get_parameters',
+                    node: nodeObj.id
                 }));
             }
-        }
+
+            const topicsToMonitor = [...nodeObj.pubs, ...nodeObj.subs].filter(t => !t.includes('parameter'));
+            if (topicsToMonitor.length === 0) return;
+
+            if (this.ws && this.connected && this.monitorHz) {
+                this.ws.send(JSON.stringify({
+                    action: 'monitor',
+                    topics: topicsToMonitor
+                }));
+            }
+        },
     }));
 });
+

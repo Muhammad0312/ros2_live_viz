@@ -29,6 +29,7 @@
 #include <sys/types.h> // pid_t
 
 #include "rclcpp/rclcpp.hpp"
+#include <rclcpp/parameter_client.hpp>
 #include "rclcpp/generic_subscription.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "ros2_live_viz/websocket_server.hpp"
@@ -150,19 +151,16 @@ private:
     // ── Hz Monitor ──
     rclcpp::TimerBase::SharedPtr hz_timer_;
     rclcpp::CallbackGroupType hz_cb_type_ =
-        rclcpp::CallbackGroupType::MutuallyExclusive;
+        rclcpp::CallbackGroupType::Reentrant;
     rclcpp::CallbackGroup::SharedPtr hz_callback_group_;
 
     static constexpr double EMA_ALPHA = 0.25;
 
     struct TopicMetrics {
         rclcpp::GenericSubscription::SharedPtr sub;
-        // Lock-free: written by the subscription callback, read by the timer
-        std::atomic<int64_t> last_arrival_ns{0};
-        std::atomic<int64_t> prev_arrival_ns{0};
-        // Smoothed result — only touched inside metrics_mutex_
+        std::atomic<uint64_t> msg_count{0};
+        int64_t last_check_ns{0};
         double hz_ema{0.0};
-        bool first_msg{true};
     };
 
     std::mutex metrics_mutex_;
@@ -356,26 +354,85 @@ private:
     {
         // Parse: {"action":"monitor","topics":["/t1","/t2"]}
         // Lightweight manual parsing (no JSON library)
-        if (msg.find("\"monitor\"") == std::string::npos &&
-            msg.find("\"action\"") == std::string::npos) return;
+        if (msg.find("\"action\":\"monitor\"") != std::string::npos || msg.find("\"action\": \"monitor\"") != std::string::npos) {
+            std::vector<std::string> target_topics;
+            auto pos = msg.find('[');
+            if (pos == std::string::npos) return;
 
-        std::vector<std::string> target_topics;
-        auto pos = msg.find('[');
-        if (pos == std::string::npos) return;
+            auto end_pos = msg.find(']', pos);
+            if (end_pos == std::string::npos) return;
 
-        auto end_pos = msg.find(']', pos);
-        if (end_pos == std::string::npos) return;
+            std::string list = msg.substr(pos + 1, end_pos - pos - 1);
+            size_t start = 0;
+            while ((start = list.find('"', start)) != std::string::npos) {
+                size_t stop = list.find('"', start + 1);
+                if (stop == std::string::npos) break;
+                target_topics.push_back(list.substr(start + 1, stop - start - 1));
+                start = stop + 1;
+            }
 
-        std::string list = msg.substr(pos + 1, end_pos - pos - 1);
-        size_t start = 0;
-        while ((start = list.find('"', start)) != std::string::npos) {
-            size_t stop = list.find('"', start + 1);
-            if (stop == std::string::npos) break;
-            target_topics.push_back(list.substr(start + 1, stop - start - 1));
-            start = stop + 1;
+            update_subscriptions(target_topics);
+        } else if (msg.find("\"action\":\"get_parameters\"") != std::string::npos || msg.find("\"action\": \"get_parameters\"") != std::string::npos) {
+            auto pos = msg.find("\"node\"");
+            if (pos != std::string::npos) {
+                pos = msg.find('"', pos + 6);
+                if (pos != std::string::npos) {
+                    auto end_pos = msg.find('"', pos + 1);
+                    if (end_pos != std::string::npos) {
+                        std::string target_node = msg.substr(pos + 1, end_pos - pos - 1);
+                        fetch_parameters_and_send(target_node);
+                    }
+                }
+            }
         }
+    }
 
-        update_subscriptions(target_topics);
+    void fetch_parameters_and_send(const std::string& target_node) {
+        std::thread([this, target_node]() {
+            try {
+                auto client = std::make_shared<rclcpp::AsyncParametersClient>(this, target_node);
+                if (!client->wait_for_service(std::chrono::seconds(2))) {
+                    RCLCPP_DEBUG(this->get_logger(), "Parameter service not available for %s", target_node.c_str());
+                    return;
+                }
+                auto list_future = client->list_parameters({}, 10);
+                if (list_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) return;
+                
+                auto list = list_future.get();
+                if (list.names.empty()) return;
+
+                auto params_future = client->get_parameters(list.names);
+                if (params_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) return;
+
+                auto params = params_future.get();
+                
+                std::ostringstream ss;
+                ss << "{\"type\":\"parameters\",\"node\":\"" << target_node << "\",\"parameters\":{";
+                bool first = true;
+                for (const auto & p : params) {
+                    if (!first) ss << ",";
+                    std::string key = p.get_name();
+                    std::string val = p.value_to_string();
+                    
+                    auto escape_json = [](const std::string& s) {
+                        std::string res;
+                        for (char c : s) {
+                            if (c == '"') res += "\\\"";
+                            else if (c == '\\') res += "\\\\";
+                            else if (c == '\n') res += "\\n";
+                            else res += c;
+                        }
+                        return res;
+                    };
+                    ss << "\"" << escape_json(key) << "\":\"" << escape_json(val) << "\"";
+                    first = false;
+                }
+                ss << "}}";
+                ws_server_.broadcast(ss.str());
+            } catch (const std::exception& e) {
+                RCLCPP_DEBUG(this->get_logger(), "Error fetching parameters for %s: %s", target_node.c_str(), e.what());
+            }
+        }).detach();
     }
 
     
@@ -406,27 +463,21 @@ private:
             auto it = topic_names_and_types.find(t);
             if (it != topic_names_and_types.end() && !it->second.empty()) {
                 auto m = std::make_shared<TopicMetrics>();
+                m->last_check_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
 
                 try {
                     rclcpp::SubscriptionOptions sub_opts;
                     sub_opts.callback_group = hz_callback_group_;
+                    
+                    // Increase queue size to 1000 to prevent RMW drops under extreme load
+                    auto custom_qos = rclcpp::SensorDataQoS().keep_last(1000);
 
                     m->sub = this->create_generic_subscription(
-                        t, it->second[0], rclcpp::SensorDataQoS(),
-                        // HOT PATH — lock-free atomic write only.
-                        // Zero deserialization: we only timestamp arrivals.
+                        t, it->second[0], custom_qos,
+                        // Zero deserialization: we only increment a counter
                         [m](std::shared_ptr<rclcpp::SerializedMessage>) {
-                            const int64_t now_ns =
-                                std::chrono::duration_cast<
-                                    std::chrono::nanoseconds>(
-                                    std::chrono::steady_clock::now()
-                                        .time_since_epoch()).count();
-                            m->prev_arrival_ns.store(
-                                m->last_arrival_ns.load(
-                                    std::memory_order_relaxed),
-                                std::memory_order_relaxed);
-                            m->last_arrival_ns.store(
-                                now_ns, std::memory_order_relaxed);
+                            m->msg_count.fetch_add(1, std::memory_order_relaxed);
                         },
                         sub_opts);
 
@@ -456,35 +507,23 @@ private:
         bool first = true;
 
         for (auto & [topic, m] : monitored_topics_) {
-            const int64_t t_last =
-                m->last_arrival_ns.load(std::memory_order_relaxed);
-            const int64_t t_prev =
-                m->prev_arrival_ns.load(std::memory_order_relaxed);
-
-            if (t_last > 0 && t_prev > 0 && t_last > t_prev) {
-                const double dt_ms = (t_last - t_prev) / 1'000'000.0;
-                if (dt_ms > 0.5 && dt_ms < 10'000.0) {
-                    const double hz_raw = 1000.0 / dt_ms;
-                    if (m->first_msg) {
-                        m->hz_ema = hz_raw;
-                        m->first_msg = false;
-                    } else {
-                        m->hz_ema = EMA_ALPHA * hz_raw +
-                                    (1.0 - EMA_ALPHA) * m->hz_ema;
-                    }
-                }
-            } else if (t_last == 0) {
-                m->hz_ema = 0.0;
+            const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            
+            const double dt_s = (now_ns - m->last_check_ns) / 1e9;
+            uint64_t count = m->msg_count.exchange(0, std::memory_order_relaxed);
+            
+            double current_hz = 0.0;
+            if (dt_s > 0.0) {
+                current_hz = count / dt_s;
             }
 
-            // Stale check: no message for > 3 seconds → dead
-            const int64_t now_ns =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now()
-                        .time_since_epoch()).count();
-            if (t_last > 0 && (now_ns - t_last) > 3'000'000'000LL) {
-                m->hz_ema = 0.0;
-            }
+            // Exponential Moving Average to smooth sudden spikes/drops
+            m->hz_ema = (EMA_ALPHA * current_hz) + ((1.0 - EMA_ALPHA) * m->hz_ema);
+            m->last_check_ns = now_ns;
+
+            // Strict floor if exactly 0 messages arrived in the last tick
+            if (count == 0) m->hz_ema = 0.0;
 
             if (!first) ss << ",";
             ss << "\"" << topic << "\":";

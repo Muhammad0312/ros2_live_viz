@@ -465,9 +465,10 @@
                         <button class="close-btn" @click="closeInspector">✕</button>
                     </div>
 
-                    <div class="inspector-section" x-show="selectedNode.pubs.length > 0">
+                    <div class="inspector-section"
+                        x-show="selectedNode.pubs.filter(t => !t.includes('parameter')).length > 0">
                         <h3>Publishing</h3>
-                        <template x-for="topic in selectedNode.pubs" :key="topic">
+                        <template x-for="topic in selectedNode.pubs.filter(t => !t.includes('parameter'))" :key="topic">
                             <div class="topic-row">
                                 <span class="topic-name" x-text="topic"></span>
                                 <template x-if="monitorHz">
@@ -480,9 +481,10 @@
                         </template>
                     </div>
 
-                    <div class="inspector-section" x-show="selectedNode.subs.length > 0">
+                    <div class="inspector-section"
+                        x-show="selectedNode.subs.filter(t => !t.includes('parameter')).length > 0">
                         <h3>Subscribing</h3>
-                        <template x-for="topic in selectedNode.subs" :key="topic">
+                        <template x-for="topic in selectedNode.subs.filter(t => !t.includes('parameter'))" :key="topic">
                             <div class="topic-row">
                                 <span class="topic-name" x-text="topic"></span>
                                 <template x-if="monitorHz">
@@ -493,6 +495,17 @@
                                 </template>
                             </div>
                         </template>
+                    </div>
+                    <div class="inspector-section" x-show="Object.keys(selectedNodeParams).length > 0">
+                        <h3>Parameters</h3>
+                        <div class="params-container">
+                            <template x-for="(val, key) in selectedNodeParams" :key="key">
+                                <div class="topic-row">
+                                    <span class="topic-name" style="color: #64ffda;" x-text="key"></span>
+                                    <span class="topic-hz" style="color: #aaa;" x-text="val"></span>
+                                </div>
+                            </template>
+                        </div>
                     </div>
                 </div>
             </template>

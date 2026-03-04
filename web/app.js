@@ -14,6 +14,24 @@ document.addEventListener('alpine:init', () => {
         nsLayout: new Map(), // Cached namespace layouts
         selectedNodeParams: {}, // Store parameters for the selected node
 
+        // Namespace Filtering State
+        allNamespaces: [],
+        ignoredNamespaces: [],
+        showFilterMenu: false,
+        lastPayload: null,
+
+        toggleNamespace(ns) {
+            if (this.ignoredNamespaces.includes(ns)) {
+                this.ignoredNamespaces = this.ignoredNamespaces.filter(n => n !== ns);
+            } else {
+                this.ignoredNamespaces.push(ns);
+            }
+            this._lastFingerprint = null; // force rebuild
+            if (this.lastPayload) {
+                this.reconcileGraph(this.lastPayload);
+            }
+        },
+
         // Reconciler State
         graphData: { nodes: [], links: [] },
         nodeMap: new Map(), // Keep track of node metadata
@@ -78,6 +96,7 @@ document.addEventListener('alpine:init', () => {
         // RECONCILER (Implicit Edges)
         // --------------------------------------------------------------------
         reconcileGraph(payload) {
+            this.lastPayload = payload;
             const elements = payload.elements || [];
 
             // Build a fingerprint of the incoming graph to detect actual structural changes
@@ -97,10 +116,18 @@ document.addEventListener('alpine:init', () => {
             const ignoredTopics = ['/rosout', '/parameter_events'];
 
             // First pass: Construct or clear Nodes
+            const discoveredNamespaces = new Set();
             elements.forEach(el => {
                 const d = el.data;
                 if (!d.source && d.type === 'node') {
                     if (d.id.includes('live_viz_backend')) return;
+
+                    const parts = d.id.split('/');
+                    const ns = parts.slice(0, -1).join('/') || '/';
+                    discoveredNamespaces.add(ns);
+
+                    if (this.ignoredNamespaces.includes(ns)) return;
+
                     incomingNodeIds.add(d.id);
                     if (!this.nodeMap.has(d.id)) {
                         this.nodeMap.set(d.id, { id: d.id, pubs: [], subs: [] });
@@ -112,6 +139,9 @@ document.addEventListener('alpine:init', () => {
                     }
                 }
             });
+
+            // Update global namespace list
+            this.allNamespaces = Array.from(discoveredNamespaces).sort();
 
             // Remove stale nodes (so D3 simulation drops them gracefully)
             for (const [id, node] of this.nodeMap.entries()) {
@@ -126,10 +156,14 @@ document.addEventListener('alpine:init', () => {
                 if (d.source) {
                     if (ignoredTopics.includes(d.target) || ignoredTopics.includes(d.source)) return;
 
+                    // Ensure neither side of the edge is in an ignored namespace (i.e., not in nodeMap)
+                    if (!this.nodeMap.has(d.source) && !this.nodeMap.has(d.target)) return;
+
                     if (this.nodeMap.has(d.source)) {
                         this.nodeMap.get(d.source).pubs.push(d.target);
                         topicCount.add(d.target);
-                    } else if (this.nodeMap.has(d.target)) {
+                    }
+                    if (this.nodeMap.has(d.target)) {
                         this.nodeMap.get(d.target).subs.push(d.source);
                         topicCount.add(d.source);
                     }

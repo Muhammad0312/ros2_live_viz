@@ -134,13 +134,14 @@
             position: absolute;
             top: 24px;
             left: 24px;
-            padding: 8px 16px;
+            padding: 12px;
             border-radius: 12px;
             display: flex;
-            flex-direction: row;
-            align-items: center;
-            gap: 16px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
             z-index: 1000;
+            width: 150px;
         }
 
         .connection-status {
@@ -169,24 +170,26 @@
 
         .controls {
             display: flex;
-            align-items: center;
-            gap: 8px;
+            flex-direction: column;
+            gap: 6px;
         }
 
         .btn {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 4px 8px;
+            color: var(--text-secondary);
+            padding: 6px 8px;
             border-radius: 6px;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 500;
             cursor: pointer;
             font-family: var(--font-ui);
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 6px;
             transition: background 0.2s;
+            width: 100%;
         }
 
         .btn:hover {
@@ -209,11 +212,12 @@
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
-            padding: 4px 8px;
+            padding: 6px 8px;
             border-radius: 6px;
-            font-size: 10px;
+            font-size: 11px;
             font-family: var(--font-mono);
-            width: 120px;
+            width: 100%;
+            box-sizing: border-box;
             transition: all 0.2s;
             outline: none;
         }
@@ -221,7 +225,6 @@
         .search-input:focus {
             background: rgba(255, 255, 255, 0.1);
             border-color: rgba(255, 255, 255, 0.3);
-            width: 160px;
         }
 
         .search-input::placeholder {
@@ -244,9 +247,6 @@
             display: flex;
             align-items: center;
             gap: 16px;
-            border-left: 1px solid var(--border-color);
-            padding-left: 16px;
-            height: 24px;
         }
 
         .stat-item {
@@ -308,9 +308,7 @@
             font-size: 16px;
             font-weight: 600;
             color: #ffffff;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            word-break: break-all;
             font-family: var(--font-mono);
         }
 
@@ -430,7 +428,7 @@
                         @input="applyHighlighting()">
                 </div>
                 <!-- Divider -->
-                <div style="width: 1px; height: 16px; background: var(--border-color); margin: 0 4px;"></div>
+                <div style="height: 1px; background: var(--border-color); margin: 2px 0;"></div>
                 <button class="btn" @click="fitView" title="Fit to Screen">
                     <span>Fit View</span>
                 </button>
@@ -438,8 +436,8 @@
                     <span>Hz: <span x-text="monitorHz ? 'ON' : 'OFF'"></span></span>
                 </button>
             </div>
-
-            <div class="stats-horizontal">
+            <div style="height: 1px; background: var(--border-color); margin: 2px 0;"></div>
+            <div class="stats-horizontal" style="flex-direction: column; gap: 4px;">
                 <div class="stat-item">
                     <span class="stat-label">Nodes</span>
                     <span class="stat-value" x-text="metrics.nodes">0</span>

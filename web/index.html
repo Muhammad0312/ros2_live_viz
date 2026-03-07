@@ -135,6 +135,22 @@
             pointer-events: none;
         }
 
+        .node.waiting rect.node-header-bg,
+        .node.waiting rect.node-body-bg {
+            stroke-dasharray: 4 4;
+            opacity: 0.4;
+            stroke: var(--text-secondary);
+        }
+
+        .node.waiting text {
+            opacity: 0.3;
+        }
+
+        .node.live rect.node-header-bg,
+        .node.live rect.node-body-bg {
+            opacity: 1.0;
+        }
+        
         .ns-label {
             fill: rgba(255, 255, 255, 0.3);
             font-family: var(--font-ui);

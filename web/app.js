@@ -13,6 +13,54 @@ document.addEventListener('alpine:init', () => {
         searchQuery: '',
         nsLayout: new Map(), // Cached namespace layouts
         selectedNodeParams: {}, // Store parameters for the selected node
+        isSettled: false,
+        intentNodes: [],
+        stabilityTimer: null,
+        lastLiveNodeCount: 0,
+
+        flattenIntentTree(node) {
+            let results = [];
+            if (node.type === 'node' || node.type === 'composable_node') {
+                const fqn = node.info && node.info["Full Name"] ? node.info["Full Name"] : node.name;
+                results.push({ id: fqn, name: node.name, type: 'node', isIntent: true });
+            }
+            if (node.children) {
+                node.children.forEach(c => {
+                    results = results.concat(this.flattenIntentTree(c));
+                });
+            }
+            return results;
+        },
+
+        checkStability(elements) {
+            const liveNodeIds = new Set(elements.filter(el => !el.data.source && el.data.type === 'node' && !el.data.id.includes('live_viz_backend')).map(el => el.data.id));
+            const liveCount = liveNodeIds.size;
+            const intentCount = this.intentNodes.length;
+
+            // If we match or exceed intent, we are settled
+            if (intentCount > 0 && liveCount >= intentCount) {
+                console.log(`[Stability] Settled by matching intent count (${liveCount}/${intentCount})`);
+                this.isSettled = true;
+                return;
+            }
+
+            // Fallback: If node count is stable for 3 seconds
+            if (liveCount === this.lastLiveNodeCount && liveCount > 0) {
+                if (!this.stabilityTimer) {
+                    this.stabilityTimer = setTimeout(() => {
+                        console.log(`[Stability] Settled by time stability (${liveCount} nodes)`);
+                        this.isSettled = true;
+                        if (this.lastPayload) this.reconcileGraph(this.lastPayload);
+                    }, 3000);
+                }
+            } else {
+                if (this.stabilityTimer) {
+                    clearTimeout(this.stabilityTimer);
+                    this.stabilityTimer = null;
+                }
+                this.lastLiveNodeCount = liveCount;
+            }
+        },
 
         // Namespace Filtering State
         allNamespaces: [],
@@ -100,12 +148,23 @@ document.addEventListener('alpine:init', () => {
             this.lastPayload = payload;
             const elements = payload.elements || [];
 
+            // Process Intent Tree if provided (usually only on first message)
+            if (payload.intent && this.intentNodes.length === 0) {
+                this.intentNodes = this.flattenIntentTree(payload.intent);
+                console.log(`[Reconciler] Flattened ${this.intentNodes.length} intent nodes`);
+            }
+
+            // check stability BEFORE rebuilding map
+            if (!this.isSettled) {
+                this.checkStability(elements);
+            }
+
             // Build a fingerprint of the incoming graph to detect actual structural changes
             const incomingFingerprint = elements
                 .filter(el => !el.data.source && el.data.type === 'node' && !el.data.id.includes('live_viz_backend'))
                 .map(el => el.data.id)
                 .sort()
-                .join('|');
+                .join('|') + (this.isSettled ? '_settled' : '_waiting');
 
             if (this._lastFingerprint && this._lastFingerprint === incomingFingerprint) {
                 return; // Graph is structurally identical — skip the entire rebuild
@@ -118,58 +177,72 @@ document.addEventListener('alpine:init', () => {
 
             // First pass: Construct or clear Nodes
             const discoveredNamespaces = new Set();
-            elements.forEach(el => {
-                const d = el.data;
-                if (!d.source && d.type === 'node') {
-                    if (d.id.includes('live_viz_backend')) return;
 
-                    const parts = d.id.split('/');
+            // IF NOT SETTLED: We ONLY show intent nodes
+            if (!this.isSettled) {
+                this.nodeMap.clear();
+                this.intentNodes.forEach(inode => {
+                    this.nodeMap.set(inode.id, { ...inode, pubs: [], subs: [], status: 'waiting' });
+                    const parts = inode.id.split('/');
                     const ns = parts.slice(0, -1).join('/') || '/';
                     discoveredNamespaces.add(ns);
+                });
+            } else {
+                // SETTLED: Normal live graph replacement logic
+                elements.forEach(el => {
+                    const d = el.data;
+                    if (!d.source && d.type === 'node') {
+                        if (d.id.includes('live_viz_backend')) return;
 
-                    if (this.ignoredNamespaces.includes(ns)) return;
+                        const parts = d.id.split('/');
+                        const ns = parts.slice(0, -1).join('/') || '/';
+                        discoveredNamespaces.add(ns);
 
-                    incomingNodeIds.add(d.id);
-                    if (!this.nodeMap.has(d.id)) {
-                        this.nodeMap.set(d.id, { id: d.id, pubs: [], subs: [] });
-                    } else {
-                        // Clear them so we completely rebuild the edges cleanly
-                        const node = this.nodeMap.get(d.id);
-                        node.pubs = [];
-                        node.subs = [];
+                        if (this.ignoredNamespaces.includes(ns)) return;
+
+                        incomingNodeIds.add(d.id);
+                        if (!this.nodeMap.has(d.id)) {
+                            this.nodeMap.set(d.id, { id: d.id, name: d.name, type: 'node', pubs: [], subs: [], status: 'live' });
+                        } else {
+                            const node = this.nodeMap.get(d.id);
+                            node.pubs = [];
+                            node.subs = [];
+                            node.status = 'live';
+                        }
+                    }
+                });
+
+                // Remove stale nodes
+                for (const [id, node] of this.nodeMap.entries()) {
+                    if (!incomingNodeIds.has(id)) {
+                        this.nodeMap.delete(id);
                     }
                 }
-            });
+            }
 
             // Update global namespace list
             this.allNamespaces = Array.from(discoveredNamespaces).sort();
 
-            // Remove stale nodes (so D3 simulation drops them gracefully)
-            for (const [id, node] of this.nodeMap.entries()) {
-                if (!incomingNodeIds.has(id)) {
-                    this.nodeMap.delete(id);
-                }
-            }
-
             // Second pass: Populate Node edges (Pubs/Subs)
-            elements.forEach(el => {
-                const d = el.data;
-                if (d.source) {
-                    if (ignoredTopics.includes(d.target) || ignoredTopics.includes(d.source)) return;
+            if (this.isSettled) {
+                elements.forEach(el => {
+                    const d = el.data;
+                    if (d.source) {
+                        if (ignoredTopics.includes(d.target) || ignoredTopics.includes(d.source)) return;
 
-                    // Ensure neither side of the edge is in an ignored namespace (i.e., not in nodeMap)
-                    if (!this.nodeMap.has(d.source) && !this.nodeMap.has(d.target)) return;
+                        if (!this.nodeMap.has(d.source) && !this.nodeMap.has(d.target)) return;
 
-                    if (this.nodeMap.has(d.source)) {
-                        this.nodeMap.get(d.source).pubs.push(d.target);
-                        topicCount.add(d.target);
+                        if (this.nodeMap.has(d.source)) {
+                            this.nodeMap.get(d.source).pubs.push(d.target);
+                            topicCount.add(d.target);
+                        }
+                        if (this.nodeMap.has(d.target)) {
+                            this.nodeMap.get(d.target).subs.push(d.source);
+                            topicCount.add(d.source);
+                        }
                     }
-                    if (this.nodeMap.has(d.target)) {
-                        this.nodeMap.get(d.target).subs.push(d.source);
-                        topicCount.add(d.source);
-                    }
-                }
-            });
+                });
+            }
 
             // Deduplicate pubs and subs to avoid Alpine x-for key collisions
             for (const node of this.nodeMap.values()) {
@@ -221,6 +294,10 @@ document.addEventListener('alpine:init', () => {
             this.metrics.nodes = this.graphData.nodes.length;
             this.metrics.topics = topicCount.size;
             this.metrics.edges = this.graphData.links.length;
+
+            if (!this.isSettled) {
+                this.checkStability();
+            }
 
             // Recalculate Proportional Column Allocations (Max 16 Columns)
             this.recalculateColumnAllocations();
@@ -644,6 +721,10 @@ document.addEventListener('alpine:init', () => {
 
             node = nodeEnter.merge(node);
 
+            // Apply status classes
+            node.classed("waiting", d => d.status === 'waiting')
+                .classed("live", d => d.status === 'live');
+
             // Detect if the layout changed
             const currentLayoutKey = this.nsLayout ?
                 [...this.nsLayout.entries()].map(([ns, l]) => `${ns}:${l.cols}:${Math.round(l.xStart)}`).join(',') : '';
@@ -974,7 +1055,9 @@ document.addEventListener('alpine:init', () => {
                     if (!hasSearch) return false;
                     // If there's a selection, the search highlight is overridden/secondary
                     return d.id.toLowerCase().includes(searchLower);
-                });
+                })
+                .classed("waiting", d => d.status === 'waiting')
+                .classed("live", d => d.status === 'live');
 
             this.g.selectAll(".link")
                 .classed("dimmed", d => {

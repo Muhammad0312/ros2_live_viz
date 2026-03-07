@@ -31,7 +31,7 @@ from launch import LaunchContext, LaunchDescription
 from ros2launch.api.api import parse_launch_arguments
 from ros2launch.option import OptionExtension
 
-from ..scanner import LaunchTreeScanner
+from ros2_launch_viz_core.scanner import LaunchTreeScanner
 
 
 class LiveVizOption(OptionExtension):

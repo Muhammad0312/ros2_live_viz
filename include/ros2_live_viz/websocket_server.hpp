@@ -264,8 +264,9 @@ private:
         http::async_write(stream_, *sp,
             [self = shared_from_this(), sp](
                 beast::error_code ec, std::size_t) {
-                self->stream_.socket().shutdown(
+                auto _ec = self->stream_.socket().shutdown(
                     tcp::socket::shutdown_send, ec);
+                (void)_ec;
             });
     }
 };

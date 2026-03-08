@@ -94,6 +94,7 @@
             fill: none;
             stroke: rgba(255, 255, 255, 0.15);
             stroke-width: 1.5px;
+            pointer-events: none;
             transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
         }
 
@@ -536,12 +537,7 @@
         }
 
         /* Make highlighted links hoverable with a wider hit area */
-        .link.highlight {
-            pointer-events: stroke;
-            cursor: pointer;
-        }
-
-        .link.highlight:hover {
+        .link.highlight.hovered {
             stroke: #80deea;
             stroke-width: 3px;
         }

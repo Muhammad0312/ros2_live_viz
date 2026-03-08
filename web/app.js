@@ -652,26 +652,45 @@ document.addEventListener('alpine:init', () => {
             const headerH = 24;
             const bodyH = 32;
 
-            // --- LINKS ---
-            let link = this.g.selectAll(".link")
+            // --- LINK HIT AREAS (invisible wide paths for easier hovering) ---
+            let linkHit = this.g.selectAll(".link-hit")
                 .data(this.graphData.links, d => d.id);
 
-            link.exit().remove();
+            linkHit.exit().remove();
 
-            const linkEnter = link.enter().insert("path", ".node") // Insert paths before nodes so they draw underneath
-                .attr("class", "link")
-                .attr("marker-end", "url(#arrowhead)")
+            const linkHitEnter = linkHit.enter().insert("path", ".node")
+                .attr("class", "link-hit")
+                .attr("fill", "none")
+                .attr("stroke", "transparent")
+                .attr("stroke-width", 30)
+                .attr("stroke-linecap", "round")
+                .style("pointer-events", "stroke")
+                .style("cursor", "pointer")
                 .on("mouseenter", (event, d) => {
                     if (!this.activeLinkIds.has(d.id)) return;
                     this._showLinkTooltip(event, d);
+                    this.g.selectAll(".link").filter(l => l.id === d.id).classed("hovered", true);
                 })
                 .on("mousemove", (event, d) => {
                     if (!this.activeLinkIds.has(d.id)) return;
                     this._moveLinkTooltip(event);
                 })
-                .on("mouseleave", () => {
+                .on("mouseleave", (event, d) => {
                     this._hideLinkTooltip();
+                    this.g.selectAll(".link").filter(l => l.id === d.id).classed("hovered", false);
                 });
+
+            linkHit = linkHitEnter.merge(linkHit);
+
+            // --- VISIBLE LINKS ---
+            let link = this.g.selectAll(".link")
+                .data(this.graphData.links, d => d.id);
+
+            link.exit().remove();
+
+            const linkEnter = link.enter().insert("path", ".node")
+                .attr("class", "link")
+                .attr("marker-end", "url(#arrowhead)");
 
             link = linkEnter.merge(link);
 
@@ -905,6 +924,18 @@ document.addEventListener('alpine:init', () => {
             });
             link.attr("marker-end", "url(#arrowhead)");
 
+            // Sync hit-area paths with visible link paths
+            linkHit.attr("d", d => {
+                const wS = this.calculateNodeWidth(d.source.id);
+                const wT = this.calculateNodeWidth(d.target.id);
+                const sx = d.source.x + (wS / 2);
+                const sy = d.source.y;
+                const tx = d.target.x - (wT / 2) - 8;
+                const ty = d.target.y;
+                const dx = tx - sx;
+                return `M${sx},${sy} C${sx + Math.max(100, Math.abs(dx) / 2)},${sy} ${tx - Math.max(100, Math.abs(dx) / 2)},${ty} ${tx},${ty}`;
+            });
+
             node.attr("transform", d => `translate(${d.x},${d.y})`);
 
             // Re-apply highlighting if there's an active selection
@@ -925,6 +956,18 @@ document.addEventListener('alpine:init', () => {
             this.g.selectAll(".node").filter(n => n.id === d.id)
                 .attr("transform", `translate(${d.x},${d.y})`);
             this.g.selectAll(".link").filter(l => l.source.id === d.id || l.target.id === d.id)
+                .attr("d", l => {
+                    const wS = this.calculateNodeWidth(l.source.id);
+                    const wT = this.calculateNodeWidth(l.target.id);
+                    const sx = l.source.x + (wS / 2);
+                    const sy = l.source.y;
+                    const tx = l.target.x - (wT / 2) - 8;
+                    const ty = l.target.y;
+                    const dx = tx - sx;
+                    return `M${sx},${sy} C${sx + Math.max(100, Math.abs(dx) / 2)},${sy} ${tx - Math.max(100, Math.abs(dx) / 2)},${ty} ${tx},${ty}`;
+                });
+            // Sync hit-area paths during drag
+            this.g.selectAll(".link-hit").filter(l => l.source.id === d.id || l.target.id === d.id)
                 .attr("d", l => {
                     const wS = this.calculateNodeWidth(l.source.id);
                     const wT = this.calculateNodeWidth(l.target.id);

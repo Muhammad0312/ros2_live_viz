@@ -283,7 +283,10 @@ document.addEventListener('alpine:init', () => {
                                     this.linkMap.set(linkId, link);
                                     this.graphData.links.push(link);
                                 } else {
-                                    this.linkMap.get(linkId).topics.push(topic);
+                                    const existing = this.linkMap.get(linkId);
+                                    if (!existing.topics.includes(topic)) {
+                                        existing.topics.push(topic);
+                                    }
                                 }
                             }
                         });
@@ -657,7 +660,18 @@ document.addEventListener('alpine:init', () => {
 
             const linkEnter = link.enter().insert("path", ".node") // Insert paths before nodes so they draw underneath
                 .attr("class", "link")
-                .attr("marker-end", "url(#arrowhead)");
+                .attr("marker-end", "url(#arrowhead)")
+                .on("mouseenter", (event, d) => {
+                    if (!this.activeLinkIds.has(d.id)) return;
+                    this._showLinkTooltip(event, d);
+                })
+                .on("mousemove", (event, d) => {
+                    if (!this.activeLinkIds.has(d.id)) return;
+                    this._moveLinkTooltip(event);
+                })
+                .on("mouseleave", () => {
+                    this._hideLinkTooltip();
+                });
 
             link = linkEnter.merge(link);
 
@@ -890,6 +904,7 @@ document.addEventListener('alpine:init', () => {
                 return `M${sx},${sy} C${sx + Math.max(100, Math.abs(dx) / 2)},${sy} ${tx - Math.max(100, Math.abs(dx) / 2)},${ty} ${tx},${ty}`;
             });
             link.attr("marker-end", "url(#arrowhead)");
+
             node.attr("transform", d => `translate(${d.x},${d.y})`);
 
             // Re-apply highlighting if there's an active selection
@@ -920,6 +935,8 @@ document.addEventListener('alpine:init', () => {
                     const dx = tx - sx;
                     return `M${sx},${sy} C${sx + Math.max(100, Math.abs(dx) / 2)},${sy} ${tx - Math.max(100, Math.abs(dx) / 2)},${ty} ${tx},${ty}`;
                 });
+            // Update link labels for dragged edges
+            this._hideLinkTooltip();
         },
         dragended(event, d) {
             // Pin the node where the user dropped it — no snap-back
@@ -1035,6 +1052,8 @@ document.addEventListener('alpine:init', () => {
                 this.g.selectAll(".link")
                     .classed("dimmed", false)
                     .classed("highlight", false);
+                this.g.selectAll(".link-label")
+                    .classed("visible", false);
                 return;
             }
 
@@ -1080,6 +1099,37 @@ document.addEventListener('alpine:init', () => {
             this.selectedNode = null;
             this.inspectorOpen = false;
             this.applyHighlighting();
+        },
+
+        // Tooltip helpers for link hover
+        _showLinkTooltip(event, d) {
+            const tooltip = document.getElementById('link-tooltip');
+            const topics = d.topics || [];
+            if (topics.length === 0) return;
+
+            const srcName = typeof d.source === 'object' ? d.source.id : d.source;
+            const tgtName = typeof d.target === 'object' ? d.target.id : d.target;
+            const srcShort = srcName.split('/').pop();
+            const tgtShort = tgtName.split('/').pop();
+
+            let html = `<div class="topic-direction">${srcShort} → ${tgtShort}</div>`;
+            topics.forEach(t => {
+                html += `<div class="topic-entry">${t}</div>`;
+            });
+            tooltip.innerHTML = html;
+            tooltip.style.display = 'block';
+            this._moveLinkTooltip(event);
+        },
+
+        _moveLinkTooltip(event) {
+            const tooltip = document.getElementById('link-tooltip');
+            tooltip.style.left = (event.clientX + 14) + 'px';
+            tooltip.style.top = (event.clientY - 10) + 'px';
+        },
+
+        _hideLinkTooltip() {
+            const tooltip = document.getElementById('link-tooltip');
+            tooltip.style.display = 'none';
         },
 
         closeInspector() {

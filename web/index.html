@@ -150,7 +150,7 @@
         .node.live rect.node-body-bg {
             opacity: 1.0;
         }
-        
+
         .ns-label {
             fill: rgba(255, 255, 255, 0.3);
             font-family: var(--font-ui);
@@ -299,7 +299,7 @@
         }
 
         .stat-value {
-            color: #4db6ac;
+            color: #10b981;
             font-family: var(--font-mono);
             font-size: 12px;
             font-weight: 600;
@@ -506,6 +506,92 @@
             color: var(--text-primary);
             word-break: break-all;
         }
+
+        /* Topic tooltip on highlighted link hover */
+        .link-tooltip {
+            position: fixed;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-primary);
+            pointer-events: none;
+            z-index: 3000;
+            max-width: 420px;
+            line-height: 1.6;
+            display: none;
+        }
+
+        .link-tooltip .topic-entry {
+            white-space: nowrap;
+            color: #80deea;
+        }
+
+        .link-tooltip .topic-direction {
+            font-size: 9px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 2px;
+        }
+
+        /* Make highlighted links hoverable with a wider hit area */
+        .link.highlight {
+            pointer-events: stroke;
+            cursor: pointer;
+        }
+
+        .link.highlight:hover {
+            stroke: #80deea;
+            stroke-width: 3px;
+        }
+
+        /* Parameter display */
+        .param-row {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            margin-bottom: 6px;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            border: 1px solid transparent;
+        }
+
+        .param-key {
+            color: #10b981;
+            font-size: 11px;
+            font-weight: 500;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            margin-bottom: 4px;
+        }
+
+        .param-value {
+            color: #b0bec5;
+            font-size: 11px;
+            overflow-wrap: break-word;
+            word-break: break-word;
+        }
+
+        .param-value.val-empty {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .param-value.val-array {
+            max-height: 100px;
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+
+        .param-array-item {
+            padding: 1px 0;
+        }
+
+        .param-array-item::before {
+            content: '• ';
+            color: var(--text-secondary);
+        }
     </style>
 </head>
 
@@ -618,11 +704,43 @@
                     </div>
                     <div class="inspector-section" x-show="Object.keys(selectedNodeParams).length > 0">
                         <h3>Parameters</h3>
-                        <div class="params-container">
+                        <div class="params-container custom-scrollbar" style="max-height: 400px; overflow-y: auto;">
                             <template x-for="(val, key) in selectedNodeParams" :key="key">
-                                <div class="topic-row">
-                                    <span class="topic-name" style="color: #64ffda;" x-text="key"></span>
-                                    <span class="topic-hz" style="color: #aaa;" x-text="val"></span>
+                                <div class="param-row">
+                                    <div class="param-key" x-text="key"></div>
+                                    <!-- Array value -->
+                                    <template x-if="val.startsWith('[') && val.endsWith(']')">
+                                        <div class="param-value val-array custom-scrollbar" x-show="val !== '[]'">
+                                            <template x-for="(item, i) in val.slice(1, -1).split(', ')" :key="i">
+                                                <div class="param-array-item" x-text="item.trim()"></div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="val.startsWith('[') && val.endsWith(']') && val === '[]'">
+                                        <div class="param-value val-empty">(empty array)</div>
+                                    </template>
+                                    <!-- Boolean value -->
+                                    <template x-if="(val === 'true' || val === 'false') && !val.startsWith('[')">
+                                        <div class="param-value val-bool" x-text="val"></div>
+                                    </template>
+                                    <!-- File path value -->
+                                    <template x-if="val.startsWith('/') && !val.startsWith('[')">
+                                        <div class="param-value val-path" x-text="val" :title="val"></div>
+                                    </template>
+                                    <!-- Numeric value -->
+                                    <template
+                                        x-if="!isNaN(val) && val !== 'true' && val !== 'false' && !val.startsWith('/') && !val.startsWith('[') && val.trim() !== ''">
+                                        <div class="param-value val-number" x-text="val"></div>
+                                    </template>
+                                    <!-- String value (fallback) -->
+                                    <template
+                                        x-if="isNaN(val) && val !== 'true' && val !== 'false' && !val.startsWith('/') && !val.startsWith('[') && val.trim() !== ''">
+                                        <div class="param-value" x-text="val"></div>
+                                    </template>
+                                    <!-- Empty string -->
+                                    <template x-if="val.trim() === '' && !val.startsWith('[')">
+                                        <div class="param-value val-empty">(empty)</div>
+                                    </template>
                                 </div>
                             </template>
                         </div>
@@ -635,6 +753,9 @@
                 </div>
             </template>
         </div>
+
+        <!-- Link Topic Tooltip -->
+        <div id="link-tooltip" class="link-tooltip glass"></div>
 
         <!-- D3 SVG Container -->
         <svg id="viz"></svg>

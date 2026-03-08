@@ -239,7 +239,7 @@ private:
     prev_state_ = current;
 
     // ── JSON Serialization (manual ostringstream — zero allocation) ──
-    // Format: {"type":"graph_delta","added":[...],"removed":[...],"intent":...}
+    // Format: {"type":"graph","elements":[...],"delta":{...}}
     // On first message (prev was empty), send full state instead of delta.
     const bool is_initial =
         added_nodes.size() == current.nodes.size() && removed_nodes.empty();
@@ -308,9 +308,9 @@ private:
        << ",\"removed_topics\":" << removed_topics.size()
        << ",\"added_edges\":" << added_edges.size()
        << ",\"removed_edges\":" << removed_edges.size();
-    ss << "},";
+    ss << "}";
 
-    ss << "\"initial\":" << (is_initial ? "true" : "false") << "}";
+    ss << "}";
 
     ws_server_.broadcast(ss.str());
   }

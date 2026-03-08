@@ -311,19 +311,13 @@ public:
     void broadcast(const std::string& message) {
         std::lock_guard<std::mutex> lock(sessions_mutex_);
         auto it = active_sessions_.begin();
-        int active_count = 0;
         while (it != active_sessions_.end()) {
             if (auto s = it->lock()) {
                 s->send_message(message);
-                ++active_count;
                 ++it;
             } else {
                 it = active_sessions_.erase(it);
             }
-        }
-        if (active_count > 0 && active_count != active_sessions_.size()) {
-            // Only print if there's a difference to avoid spam, or if debugging. 
-            // We can just keep it silent or print the active_count.
         }
     }
 

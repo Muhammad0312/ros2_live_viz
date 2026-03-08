@@ -1,5 +1,5 @@
 /**
- * ros2_live_viz V2 App - D3.js Force Layout & SVG Rendering
+ * ros2_live_viz App - D3.js Force Layout & SVG Rendering
  */
 
 document.addEventListener('alpine:init', () => {
@@ -132,12 +132,11 @@ document.addEventListener('alpine:init', () => {
 
                     incomingNodeIds.add(d.id);
                     if (!this.nodeMap.has(d.id)) {
-                        this.nodeMap.set(d.id, { id: d.id, name: d.name, type: 'node', pubs: [], subs: [], status: 'live' });
+                        this.nodeMap.set(d.id, { id: d.id, name: d.name, type: 'node', pubs: [], subs: [] });
                     } else {
                         const node = this.nodeMap.get(d.id);
                         node.pubs = [];
                         node.subs = [];
-                        node.status = 'live';
                     }
                 }
             });
@@ -677,9 +676,6 @@ document.addEventListener('alpine:init', () => {
 
             node = nodeEnter.merge(node);
 
-            // Apply status classes
-            node.classed("waiting", d => d.status === 'waiting')
-                .classed("live", d => d.status === 'live');
 
             // Detect if the layout changed
             const currentLayoutKey = this.nsLayout ?
@@ -1041,8 +1037,6 @@ document.addEventListener('alpine:init', () => {
                     // If there's a selection, the search highlight is overridden/secondary
                     return d.id.toLowerCase().includes(searchLower);
                 })
-                .classed("waiting", d => d.status === 'waiting')
-                .classed("live", d => d.status === 'live');
 
             this.g.selectAll(".link")
                 .classed("dimmed", d => {

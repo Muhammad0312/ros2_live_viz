@@ -4,34 +4,26 @@
 
 This module implements an OptionExtension that intercepts the
 ``ros2 launch`` CLI to:
-  1. Run the LaunchTreeScanner to produce the **Intent Tree** (static).
-  2. Write the Intent Tree to a temporary JSON file.
-  3. Spawn the compiled C++ ``live_viz_backend`` binary as a subprocess.
-  4. Register an ``atexit`` hook to ensure the backend is terminated
+  1. Spawn the compiled C++ ``live_viz_backend`` binary as a subprocess.
+  2. Register an ``atexit`` hook to ensure the backend is terminated
      when the launch process exits.
 
 The C++ backend is passed:
   --port 0       → bind to an OS-assigned ephemeral port
   --ppid <pid>   → parent PID for the safety daemon
-  --intent-file  → path to the temporary Intent Tree JSON
 """
 
 import atexit
-import json
 import os
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 from typing import Any, Text, Tuple
 
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchContext, LaunchDescription
-from ros2launch.api.api import parse_launch_arguments
+from launch import LaunchDescription
 from ros2launch.option import OptionExtension
-
-from ros2_launch_viz_core.scanner import LaunchTreeScanner
 
 
 class LiveVizOption(OptionExtension):
@@ -44,7 +36,6 @@ class LiveVizOption(OptionExtension):
         """Create a LiveVizOption."""
         super().__init__()
         self._backend_proc = None
-        self._intent_file = None
 
     def add_arguments(self, parser: Any, cli_name: Text) -> None:
         """
@@ -68,10 +59,8 @@ class LiveVizOption(OptionExtension):
         Interact with the launch description before the actual launch.
 
         When --tree-live is active:
-          1. Scan the launch description to extract the Intent Tree.
-          2. Write the Intent Tree to a temporary JSON file.
-          3. Spawn the C++ live_viz_backend as a background subprocess.
-          4. Register an atexit hook to kill the subprocess on exit.
+          1. Spawn the C++ live_viz_backend as a background subprocess.
+          2. Register an atexit hook to kill the subprocess on exit.
 
         :param launch_description: The launch description to process.
         :param args: The parsed CLI arguments.
@@ -82,38 +71,11 @@ class LiveVizOption(OptionExtension):
 
         print(
             '\n[ros2_live_viz] --tree-live active. '
-            'Scanning launch hierarchy...',
+            'Starting live visualization backend...',
             file=sys.stderr
         )
 
-        # ── 1. Build simulation context ──────────────────────────────────
-        context = LaunchContext(argv=args.launch_arguments)
-        try:
-            context.launch_configurations.update(
-                parse_launch_arguments(args.launch_arguments)
-            )
-        except Exception:
-            pass
-
-        # ── 2. Scan → Intent Tree ────────────────────────────────────────
-        scanner = LaunchTreeScanner(context=context, verbose=False)
-        tree_data = scanner.scan(launch_description)
-
-        # ── 3. Write Intent Tree to temp JSON ────────────────────────────
-        fd, intent_path = tempfile.mkstemp(
-            prefix=f'intent_tree_{os.getpid()}_',
-            suffix='.json'
-        )
-        with os.fdopen(fd, 'w') as f:
-            json.dump(tree_data, f)
-        self._intent_file = intent_path
-
-        print(
-            f'[ros2_live_viz] Intent tree written to {intent_path}',
-            file=sys.stderr
-        )
-
-        # ── 4. Locate the compiled C++ backend ───────────────────────────
+        # ── 1. Locate the compiled C++ backend ───────────────────────────
         pkg_prefix = get_package_share_directory('ros2_live_viz')
         backend_exe = os.path.join(
             os.path.dirname(pkg_prefix),
@@ -129,12 +91,11 @@ class LiveVizOption(OptionExtension):
             )
             return (launch_description,)
 
-        # ── 5. Spawn the C++ backend ─────────────────────────────────────
+        # ── 2. Spawn the C++ backend ─────────────────────────────────────
         cmd = [
             backend_exe,
             '--port', '0',
             '--ppid', str(os.getpid()),
-            '--intent-file', intent_path,
         ]
 
         self._backend_proc = subprocess.Popen(
@@ -143,7 +104,7 @@ class LiveVizOption(OptionExtension):
             stderr=subprocess.STDOUT,
         )
 
-        # ── 6. Read the ephemeral port from stdout ───────────────────────
+        # ── 3. Read the ephemeral port from stdout ───────────────────────
         port = None
         for line in self._backend_proc.stdout:
             decoded = line.decode('utf-8', errors='replace').strip()
@@ -163,7 +124,7 @@ class LiveVizOption(OptionExtension):
                 file=sys.stderr
             )
 
-        # ── 7. Drain remaining stdout to a log file in background ────────
+        # ── 4. Drain remaining stdout to a log file in background ────────
         def _drain_stdout(proc, log_path):
             try:
                 with open(log_path, 'w') as log_f:
@@ -180,7 +141,7 @@ class LiveVizOption(OptionExtension):
         )
         drain_thread.start()
 
-        # ── 8. Register atexit hook ──────────────────────────────────────
+        # ── 5. Register atexit hook ──────────────────────────────────────
         atexit.register(self._cleanup)
 
         print(
@@ -193,7 +154,7 @@ class LiveVizOption(OptionExtension):
         return (launch_description,)
 
     def _cleanup(self) -> None:
-        """Terminate the C++ backend subprocess and remove the temp file."""
+        """Terminate the C++ backend subprocess."""
         if self._backend_proc is not None:
             try:
                 # Graceful SIGTERM first
@@ -214,10 +175,3 @@ class LiveVizOption(OptionExtension):
                     file=sys.stderr
                 )
             self._backend_proc = None
-
-        if self._intent_file is not None:
-            try:
-                os.unlink(self._intent_file)
-            except OSError:
-                pass
-            self._intent_file = None

@@ -15,7 +15,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
-#include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -40,7 +40,6 @@ using namespace std::chrono_literals;
 struct CliArgs {
   int port = 0;
   pid_t ppid = 0;
-  std::string intent_file;
 };
 
 static CliArgs parse_cli(int argc, char *argv[]) {
@@ -51,23 +50,9 @@ static CliArgs parse_cli(int argc, char *argv[]) {
       args.port = std::stoi(argv[++i]);
     } else if (arg == "--ppid" && i + 1 < argc) {
       args.ppid = static_cast<pid_t>(std::stol(argv[++i]));
-    } else if (arg == "--intent-file" && i + 1 < argc) {
-      args.intent_file = argv[++i];
     }
   }
   return args;
-}
-
-// Load Intent Tree from JSON file (raw string — no parsing library needed)
-static std::string load_intent_tree(const std::string &path) {
-  if (path.empty())
-    return "{}";
-  std::ifstream f(path);
-  if (!f)
-    return "{}";
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 // LiveVizBackendNode
@@ -75,7 +60,7 @@ class LiveVizBackendNode : public rclcpp::Node {
 public:
   LiveVizBackendNode(const CliArgs &cli, const std::string &web_root)
       : Node("live_viz_backend"), ws_server_(cli.port, web_root),
-        ppid_(cli.ppid), intent_tree_json_(load_intent_tree(cli.intent_file)) {
+        ppid_(cli.ppid) {
     // ── Callback group for Hz subscriptions (isolated from graph poller) ──
     hz_callback_group_ = this->create_callback_group(
         rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -122,9 +107,6 @@ private:
   pid_t ppid_;
   std::atomic<bool> safety_running_{true};
   std::thread safety_thread_;
-
-  // ── Intent Tree ──
-  std::string intent_tree_json_;
 
   // ── Graph Poller ──
   rclcpp::TimerBase::SharedPtr graph_timer_;
@@ -327,11 +309,6 @@ private:
        << ",\"added_edges\":" << added_edges.size()
        << ",\"removed_edges\":" << removed_edges.size();
     ss << "},";
-
-    // Include intent tree on initial message
-    if (is_initial) {
-      ss << "\"intent\":" << intent_tree_json_ << ",";
-    }
 
     ss << "\"initial\":" << (is_initial ? "true" : "false") << "}";
 

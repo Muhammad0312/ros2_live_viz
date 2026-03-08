@@ -13,54 +13,6 @@ document.addEventListener('alpine:init', () => {
         searchQuery: '',
         nsLayout: new Map(), // Cached namespace layouts
         selectedNodeParams: {}, // Store parameters for the selected node
-        isSettled: false,
-        intentNodes: [],
-        stabilityTimer: null,
-        lastLiveNodeCount: 0,
-
-        flattenIntentTree(node) {
-            let results = [];
-            if (node.type === 'node' || node.type === 'composable_node') {
-                const fqn = node.info && node.info["Full Name"] ? node.info["Full Name"] : node.name;
-                results.push({ id: fqn, name: node.name, type: 'node', isIntent: true });
-            }
-            if (node.children) {
-                node.children.forEach(c => {
-                    results = results.concat(this.flattenIntentTree(c));
-                });
-            }
-            return results;
-        },
-
-        checkStability(elements) {
-            const liveNodeIds = new Set(elements.filter(el => !el.data.source && el.data.type === 'node' && !el.data.id.includes('live_viz_backend')).map(el => el.data.id));
-            const liveCount = liveNodeIds.size;
-            const intentCount = this.intentNodes.length;
-
-            // If we match or exceed intent, we are settled
-            if (intentCount > 0 && liveCount >= intentCount) {
-                console.log(`[Stability] Settled by matching intent count (${liveCount}/${intentCount})`);
-                this.isSettled = true;
-                return;
-            }
-
-            // Fallback: If node count is stable for 3 seconds
-            if (liveCount === this.lastLiveNodeCount && liveCount > 0) {
-                if (!this.stabilityTimer) {
-                    this.stabilityTimer = setTimeout(() => {
-                        console.log(`[Stability] Settled by time stability (${liveCount} nodes)`);
-                        this.isSettled = true;
-                        if (this.lastPayload) this.reconcileGraph(this.lastPayload);
-                    }, 3000);
-                }
-            } else {
-                if (this.stabilityTimer) {
-                    clearTimeout(this.stabilityTimer);
-                    this.stabilityTimer = null;
-                }
-                this.lastLiveNodeCount = liveCount;
-            }
-        },
 
         // Namespace Filtering State
         allNamespaces: [],
@@ -117,8 +69,8 @@ document.addEventListener('alpine:init', () => {
             this.ws.onclose = () => {
                 this.connected = false;
                 this.topicHz = {};
-                console.log('[WS] Disconnected, retrying in 2s...');
-                setTimeout(() => this.connectWs(), 2000);
+                console.log('[WS] Disconnected, retrying in 500ms...');
+                setTimeout(() => this.connectWs(), 500);
             };
 
             this.ws.onmessage = (event) => {
@@ -148,23 +100,12 @@ document.addEventListener('alpine:init', () => {
             this.lastPayload = payload;
             const elements = payload.elements || [];
 
-            // Process Intent Tree if provided (usually only on first message)
-            if (payload.intent && this.intentNodes.length === 0) {
-                this.intentNodes = this.flattenIntentTree(payload.intent);
-                console.log(`[Reconciler] Flattened ${this.intentNodes.length} intent nodes`);
-            }
-
-            // check stability BEFORE rebuilding map
-            if (!this.isSettled) {
-                this.checkStability(elements);
-            }
-
             // Build a fingerprint of the incoming graph to detect actual structural changes
             const incomingFingerprint = elements
                 .filter(el => !el.data.source && el.data.type === 'node' && !el.data.id.includes('live_viz_backend'))
                 .map(el => el.data.id)
                 .sort()
-                .join('|') + (this.isSettled ? '_settled' : '_waiting');
+                .join('|');
 
             if (this._lastFingerprint && this._lastFingerprint === incomingFingerprint) {
                 return; // Graph is structurally identical — skip the entire rebuild
@@ -175,48 +116,36 @@ document.addEventListener('alpine:init', () => {
             const incomingNodeIds = new Set();
             const ignoredTopics = ['/rosout', '/parameter_events'];
 
-            // First pass: Construct or clear Nodes
+            // First pass: Construct or update Nodes
             const discoveredNamespaces = new Set();
 
-            // IF NOT SETTLED: We ONLY show intent nodes
-            if (!this.isSettled) {
-                this.nodeMap.clear();
-                this.intentNodes.forEach(inode => {
-                    this.nodeMap.set(inode.id, { ...inode, pubs: [], subs: [], status: 'waiting' });
-                    const parts = inode.id.split('/');
+            elements.forEach(el => {
+                const d = el.data;
+                if (!d.source && d.type === 'node') {
+                    if (d.id.includes('live_viz_backend')) return;
+
+                    const parts = d.id.split('/');
                     const ns = parts.slice(0, -1).join('/') || '/';
                     discoveredNamespaces.add(ns);
-                });
-            } else {
-                // SETTLED: Normal live graph replacement logic
-                elements.forEach(el => {
-                    const d = el.data;
-                    if (!d.source && d.type === 'node') {
-                        if (d.id.includes('live_viz_backend')) return;
 
-                        const parts = d.id.split('/');
-                        const ns = parts.slice(0, -1).join('/') || '/';
-                        discoveredNamespaces.add(ns);
+                    if (this.ignoredNamespaces.includes(ns)) return;
 
-                        if (this.ignoredNamespaces.includes(ns)) return;
-
-                        incomingNodeIds.add(d.id);
-                        if (!this.nodeMap.has(d.id)) {
-                            this.nodeMap.set(d.id, { id: d.id, name: d.name, type: 'node', pubs: [], subs: [], status: 'live' });
-                        } else {
-                            const node = this.nodeMap.get(d.id);
-                            node.pubs = [];
-                            node.subs = [];
-                            node.status = 'live';
-                        }
+                    incomingNodeIds.add(d.id);
+                    if (!this.nodeMap.has(d.id)) {
+                        this.nodeMap.set(d.id, { id: d.id, name: d.name, type: 'node', pubs: [], subs: [], status: 'live' });
+                    } else {
+                        const node = this.nodeMap.get(d.id);
+                        node.pubs = [];
+                        node.subs = [];
+                        node.status = 'live';
                     }
-                });
+                }
+            });
 
-                // Remove stale nodes
-                for (const [id, node] of this.nodeMap.entries()) {
-                    if (!incomingNodeIds.has(id)) {
-                        this.nodeMap.delete(id);
-                    }
+            // Remove stale nodes
+            for (const [id, node] of this.nodeMap.entries()) {
+                if (!incomingNodeIds.has(id)) {
+                    this.nodeMap.delete(id);
                 }
             }
 
@@ -224,25 +153,23 @@ document.addEventListener('alpine:init', () => {
             this.allNamespaces = Array.from(discoveredNamespaces).sort();
 
             // Second pass: Populate Node edges (Pubs/Subs)
-            if (this.isSettled) {
-                elements.forEach(el => {
-                    const d = el.data;
-                    if (d.source) {
-                        if (ignoredTopics.includes(d.target) || ignoredTopics.includes(d.source)) return;
+            elements.forEach(el => {
+                const d = el.data;
+                if (d.source) {
+                    if (ignoredTopics.includes(d.target) || ignoredTopics.includes(d.source)) return;
 
-                        if (!this.nodeMap.has(d.source) && !this.nodeMap.has(d.target)) return;
+                    if (!this.nodeMap.has(d.source) && !this.nodeMap.has(d.target)) return;
 
-                        if (this.nodeMap.has(d.source)) {
-                            this.nodeMap.get(d.source).pubs.push(d.target);
-                            topicCount.add(d.target);
-                        }
-                        if (this.nodeMap.has(d.target)) {
-                            this.nodeMap.get(d.target).subs.push(d.source);
-                            topicCount.add(d.source);
-                        }
+                    if (this.nodeMap.has(d.source)) {
+                        this.nodeMap.get(d.source).pubs.push(d.target);
+                        topicCount.add(d.target);
                     }
-                });
-            }
+                    if (this.nodeMap.has(d.target)) {
+                        this.nodeMap.get(d.target).subs.push(d.source);
+                        topicCount.add(d.source);
+                    }
+                }
+            });
 
             // Deduplicate pubs and subs to avoid Alpine x-for key collisions
             for (const node of this.nodeMap.values()) {
@@ -297,10 +224,6 @@ document.addEventListener('alpine:init', () => {
             this.metrics.nodes = this.graphData.nodes.length;
             this.metrics.topics = topicCount.size;
             this.metrics.edges = this.graphData.links.length;
-
-            if (!this.isSettled) {
-                this.checkStability();
-            }
 
             // Recalculate Proportional Column Allocations (Max 16 Columns)
             this.recalculateColumnAllocations();
